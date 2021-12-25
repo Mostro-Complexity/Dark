@@ -5,45 +5,93 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/glm/gtx/quaternion.hpp>
+#include <btBulletDynamicsCommon.h>
 
-namespace Dark {
+namespace Dark
+{
 
-  EditorLayer::EditorLayer() :Layer("EditorLayer"), m_CameraController(1280.0f / 720.0f)
+  EditorLayer::EditorLayer() : Layer("EditorLayer"), m_CameraController(1280.0f / 720.0f)
   {
-	
+    /// initialize dynamic world
+    /// NOTE: Tests only
+    m_collisionConfiguration = std::make_unique<btDefaultCollisionConfiguration>();
+    m_dispatcher    = std::make_unique<btCollisionDispatcher>(m_collisionConfiguration.get());
+    m_broadphase    = std::make_unique<btDbvtBroadphase>();
+    m_solver        = std::make_unique<btSequentialImpulseConstraintSolver>();
+    m_dynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(
+      m_dispatcher.get(), m_broadphase.get(), m_solver.get(), m_collisionConfiguration.get());
+
+    m_dynamicsWorld->setGravity(btVector3(0, -1, 0));
+
+    /// create a few basic rigid bodies
+    /// NOTE: Tests only
+    {  // rigid body of shapes
+      btScalar        halfsize[]{ 1, 1, 1 };
+      Ref<btBoxShape> shape =
+        std::make_shared<btBoxShape>(btVector3(halfsize[0], halfsize[1], halfsize[2]));
+      m_collisionShapes.push_back(shape);
+
+      btScalar    m_SquarPosition1[] = { 0.0f, 0.0f, 0.0f };  // NOTE: position for tests
+      btScalar    m_SquarPosition2[] = { 0.0f, 0.0f, 0.0f };
+      btTransform transform;
+      transform.setIdentity();
+      transform.setOrigin(btVector3(m_SquarPosition1[0], m_SquarPosition1[1], m_SquarPosition1[2]));
+
+      btScalar         mass(0.5);
+      Ref<btRigidBody> body = CreateRigidBody(mass, transform, shape);
+      m_rigidbodies.push_back(body);
+    }
+
+    {  // rigid body of ground
+      Ref<btStaticPlaneShape> shape =
+        std::make_shared<btStaticPlaneShape>(btVector3(0, 1, 0), -1.5f);
+      m_collisionShapes.push_back(shape);
+
+      btTransform transform;
+      transform.setIdentity();
+
+      btDefaultMotionState*                    motionState = new btDefaultMotionState(transform);
+      btRigidBody::btRigidBodyConstructionInfo groundInfo(0, motionState, shape.get());
+      Ref<btRigidBody> rigidbody = std::make_shared<btRigidBody>(groundInfo);
+
+      // add the rigid body to the world and set the mask for grouping and collision detection
+      // group 1:00000001          group -1:11111111, collide with all groups
+      m_dynamicsWorld->addRigidBody(rigidbody.get(), 1, -1);
+      m_rigidbodies.push_back(rigidbody);
+    }
   }
 
   void EditorLayer::OnAttach()
   {
-	//矩形顶点数据
-	float vertices[] = {
-		 0.5f,  0.5f, 0.0f, 1.0f, 1.0f, // 右上角
-		 0.5f, -0.5f, 0.0f, 1.0f, 0.0f, // 右下角
-		-0.5f, -0.5f, 0.0f, 0.0f, 0.0f, // 左下角
-		-0.5f,  0.5f, 0.0f, 0.0f, 1.0f   // 左上角
-	};
-	//索引绘制
-	uint32_t indices[] = { // 注意索引从0开始! 
-		0, 1, 3, // 第一个三角形
-		1, 2, 3  // 第二个三角形
-	};
+    //矩形顶点数据
+    float vertices[] = {
+      0.5f,  0.5f,  0.0f, 1.0f, 1.0f,  // 右上角
+      0.5f,  -0.5f, 0.0f, 1.0f, 0.0f,  // 右下角
+      -0.5f, -0.5f, 0.0f, 0.0f, 0.0f,  // 左下角
+      -0.5f, 0.5f,  0.0f, 0.0f, 1.0f   // 左上角
+    };
+    //索引绘制
+    uint32_t indices[] = {
+      // 注意索引从0开始!
+      0, 1, 3,  // 第一个三角形
+      1, 2, 3   // 第二个三角形
+    };
 
-	m_VertexArray.reset(Dark::VertexArray::Create());
+    m_VertexArray.reset(Dark::VertexArray::Create());
 
-	Dark::Ref<Dark::VertexBuffer> m_VertexBuffer;
-	m_VertexBuffer.reset(Dark::VertexBuffer::Create(vertices, sizeof(vertices)));
-	Dark::BufferLayout layout = {
-	  { Dark::ShaderDataType::Float3, "a_Pos" },
-	  { Dark::ShaderDataType::Float2, "a_TexCoord" }
-	};
-	m_VertexBuffer->SetLayout(layout);
-	m_VertexArray->AddVertexBuffer(m_VertexBuffer);
+    Dark::Ref<Dark::VertexBuffer> m_VertexBuffer;
+    m_VertexBuffer.reset(Dark::VertexBuffer::Create(vertices, sizeof(vertices)));
+    Dark::BufferLayout layout = { { Dark::ShaderDataType::Float3, "a_Pos" },
+                                  { Dark::ShaderDataType::Float2, "a_TexCoord" } };
+    m_VertexBuffer->SetLayout(layout);
+    m_VertexArray->AddVertexBuffer(m_VertexBuffer);
 
-	Dark::Ref<Dark::IndexBuffer> m_IndexBuffer;
-	m_IndexBuffer.reset(Dark::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
-	m_VertexArray->SetIndexBuffer(m_IndexBuffer);
+    Dark::Ref<Dark::IndexBuffer> m_IndexBuffer;
+    m_IndexBuffer.reset(Dark::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
+    m_VertexArray->SetIndexBuffer(m_IndexBuffer);
 
-	std::string vertexShaderSource = R"(
+    std::string vertexShaderSource = R"(
 	  #version 330 core
 	  layout(location = 0) in vec3 a_Pos;
 	  layout(location = 1) in vec2 a_TexCoord;
@@ -60,7 +108,7 @@ namespace Dark {
 	  }
 	)";
 
-	std::string fragmentShaderSource = R"(
+    std::string fragmentShaderSource = R"(
 	  #version 330 core
 
 	  uniform sampler2D u_Texture;
@@ -74,7 +122,7 @@ namespace Dark {
 	  }
 	)";
 
-	std::string ColorfragmentShaderSource = R"(
+    std::string ColorfragmentShaderSource = R"(
 	  #version 330 core
 
 	  uniform vec4 u_Color;
@@ -88,184 +136,266 @@ namespace Dark {
 	  }
 	)";
 
-	auto& texShader = m_ShaderLibrary.Load("assets/shaders/Texture.glsl");
-	m_ShaderLibrary.Add(Shader::Create("ColorShader", vertexShaderSource, ColorfragmentShaderSource));
+    auto& texShader = m_ShaderLibrary.Load("assets/shaders/Texture.glsl");
+    m_ShaderLibrary.Add(
+      Shader::Create("ColorShader", vertexShaderSource, ColorfragmentShaderSource));
 
-	m_Texture = Texture2D::Create("assets/textures/container.jpg");
-	m_TextureBlend = Texture2D::Create("assets/textures/face.png");
-	m_DfaultTex = Texture2D::Create("assets/textures/Checkerboard.png");
+    m_Texture      = Texture2D::Create("assets/textures/container.jpg");
+    m_TextureBlend = Texture2D::Create("assets/textures/face.png");
+    m_DfaultTex    = Texture2D::Create("assets/textures/Checkerboard.png");
 
-	Dark::FramebufferSpecification fbSpec;
-	fbSpec.Width = 1280;
-	fbSpec.Height = 720;
-	m_Framebuffer = Dark::Framebuffer::Create(fbSpec);
+    Dark::FramebufferSpecification fbSpec;
+    fbSpec.Width  = 1280;
+    fbSpec.Height = 720;
+    m_Framebuffer = Dark::Framebuffer::Create(fbSpec);
 
-	std::dynamic_pointer_cast<OpenGLShader>(texShader)->use();
-	std::dynamic_pointer_cast<OpenGLShader>(texShader)->UploadUniformInt("u_Texture", 0);
+    std::dynamic_pointer_cast<OpenGLShader>(texShader)->use();
+    std::dynamic_pointer_cast<OpenGLShader>(texShader)->UploadUniformInt("u_Texture", 0);
   }
 
-  void EditorLayer::OnDetach()
-  {
-
-  }
+  void EditorLayer::OnDetach() {}
 
   void EditorLayer::OnUpdate(Dark::Timestep timestep)
   {
-	//DK_TRACE("Delta Time: {0}s  {1}ms", timestep.GetSeconds(), timestep.GetMilliseconds());
-	m_CameraController.OnUpdate(timestep);
+    // DK_TRACE("Delta Time: {0}s  {1}ms", timestep.GetSeconds(), timestep.GetMilliseconds());
+    m_CameraController.OnUpdate(timestep);
 
-	if (Dark::Input::IsKeyPressed(DK_KEY_LEFT))
-	  m_SquarPosition1.x -= 0.7f * timestep.GetSeconds();
-	if (Dark::Input::IsKeyPressed(DK_KEY_RIGHT))
-	  m_SquarPosition1.x += 0.7f * timestep.GetSeconds();
-	if (Dark::Input::IsKeyPressed(DK_KEY_DOWN))
-	  m_SquarPosition1.y -= 0.7f * timestep.GetSeconds();
-	if (Dark::Input::IsKeyPressed(DK_KEY_UP))
-	  m_SquarPosition1.y += 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_LEFT))
+    //  m_SquarPosition1.x -= 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_RIGHT))
+    //  m_SquarPosition1.x += 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_DOWN))
+    //  m_SquarPosition1.y -= 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_UP))
+    //  m_SquarPosition1.y += 0.7f * timestep.GetSeconds();
 
-	if (Dark::Input::IsKeyPressed(DK_KEY_I))
-	  m_SquarPosition2.y += 0.7f * timestep.GetSeconds();
-	if (Dark::Input::IsKeyPressed(DK_KEY_J))
-	  m_SquarPosition2.x -= 0.7f * timestep.GetSeconds();
-	if (Dark::Input::IsKeyPressed(DK_KEY_K))
-	  m_SquarPosition2.y -= 0.7f * timestep.GetSeconds();
-	if (Dark::Input::IsKeyPressed(DK_KEY_L))
-	  m_SquarPosition2.x += 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_I))
+    //  m_SquarPosition2.y += 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_J))
+    //  m_SquarPosition2.x -= 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_K))
+    //  m_SquarPosition2.y -= 0.7f * timestep.GetSeconds();
+    // if (Dark::Input::IsKeyPressed(DK_KEY_L))
+    //  m_SquarPosition2.x += 0.7f * timestep.GetSeconds();
 
-	m_Framebuffer->Bind();
+    m_Framebuffer->Bind();
 
-	Dark::RenderCommand::SetClearColor({ 0.1f, 0.2f, 0.2f, 1.0f });
-	Dark::RenderCommand::Clear();
+    Dark::RenderCommand::SetClearColor({ 0.1f, 0.2f, 0.2f, 1.0f });
+    Dark::RenderCommand::Clear();
 
-	auto texShader = m_ShaderLibrary.Get("Texture");
-	auto colorShader = m_ShaderLibrary.Get("ColorShader");
-	std::dynamic_pointer_cast<OpenGLShader>(colorShader)->use();
-	std::dynamic_pointer_cast<OpenGLShader>(colorShader)->UploadUniformFloat4("u_Color", m_SquareColor);
+    auto texShader   = m_ShaderLibrary.Get("Texture");
+    auto colorShader = m_ShaderLibrary.Get("ColorShader");
+    std::dynamic_pointer_cast<OpenGLShader>(colorShader)->use();
+    std::dynamic_pointer_cast<OpenGLShader>(colorShader)
+      ->UploadUniformFloat4("u_Color", m_SquareColor);
 
-	glm::mat4 transform1 = glm::translate(glm::mat4(1.0f), m_SquarPosition1);
-	glm::mat4 transform2 = glm::translate(glm::mat4(1.0f), m_SquarPosition2) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 1.0f));
+    /// NOTE: bullet test begin
+    glm::mat4 transform1;
+    {
+      Ref<btRigidBody> obj  = m_rigidbodies[0];
+      btRigidBody*     body = btRigidBody::upcast(obj.get());
 
+      btTransform trans;
+      if (body && body->getMotionState())
+      {
+        body->getMotionState()->getWorldTransform(trans);
+      }
+      else
+      {
+        trans = obj->getWorldTransform();
+      }
 
-	// Begin Rendering
-	{
-	  Dark::Renderer::BeginScene(m_CameraController.GetCamera());
+      glm::vec3 position =
+        glm::vec3(float(trans.getOrigin().getX()), float(trans.getOrigin().getY()),
+                  float(trans.getOrigin().getZ()));
+      btQuaternion rot  = trans.getRotation();
+      glm::quat    q    = glm::quat(rot.getW(), rot.getX(), rot.getY(), rot.getZ());
+      glm::mat4    rot4 = glm::toMat4(q);
+      transform1        = glm::translate(glm::mat4(1.0), position) * rot4;
+    }
 
-	  m_Texture->Bind();
-	  Dark::Renderer::Submit(texShader, m_VertexArray, transform1);
-	  m_TextureBlend->Bind();
-	  Dark::Renderer::Submit(texShader, m_VertexArray);
-	  Dark::Renderer::Submit(colorShader, m_VertexArray, transform2);
-	  Dark::Renderer::Submit(colorShader, m_VertexArray, glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.5f, 0.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 1.0f)));
-	  Dark::Renderer::EndScene();
-	}
-	m_Framebuffer->UnBind();
+    {
+      Ref<btRigidBody> obj  = m_rigidbodies[1];
+      btRigidBody*     body = btRigidBody::upcast(obj.get());
+
+      btTransform trans;
+      if (body && body->getMotionState())
+      {
+        body->getMotionState()->getWorldTransform(trans);
+      }
+      else
+      {
+        trans = obj->getWorldTransform();
+      }
+    }
+    /// NOTE: bullet test end
+
+    // glm::mat4 transform1 = glm::translate(glm::mat4(1.0f), m_SquarPosition1);
+    glm::mat4 transform2 = glm::translate(glm::mat4(1.0f), m_SquarPosition2)
+                           * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 1.0f));
+
+    m_dynamicsWorld->stepSimulation(timestep.GetSeconds(), 0);
+
+    // Begin Rendering
+    {
+      Dark::Renderer::BeginScene(m_CameraController.GetCamera());
+
+      m_Texture->Bind();
+      Dark::Renderer::Submit(texShader, m_VertexArray, transform1);
+      m_TextureBlend->Bind();
+      Dark::Renderer::Submit(texShader, m_VertexArray);
+      Dark::Renderer::Submit(colorShader, m_VertexArray, transform2);
+      Dark::Renderer::Submit(colorShader, m_VertexArray,
+                             glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.5f, 0.0f))
+                               * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 1.0f)));
+      Dark::Renderer::EndScene();
+    }
+    m_Framebuffer->UnBind();
   }
 
   void EditorLayer::OnEvent(Event& event)
   {
-	//DK_TRACE("{0}", event);
-	m_CameraController.OnEvent(event);
+    // DK_TRACE("{0}", event);
+    m_CameraController.OnEvent(event);
   }
 
   void EditorLayer::OnImGuiRender()
   {
-	static bool opt_fullscreen = true;
-	static bool opt_padding = false;
-	static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
-	static bool *p_open;
+    static bool               opt_fullscreen  = true;
+    static bool               opt_padding     = false;
+    static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+    static bool*              p_open;
 
-	// We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
-	// because it would be confusing to have two docking targets within each others.
-	ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
-	if (opt_fullscreen)
-	{
-	  ImGuiViewport* viewport = ImGui::GetMainViewport();
-	  ImGui::SetNextWindowPos(viewport->GetWorkPos());
-	  ImGui::SetNextWindowSize(viewport->GetWorkSize());
-	  ImGui::SetNextWindowViewport(viewport->ID);
-	  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-	  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-	  window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
-	  window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-	}
-	else
-	{
-	  dockspace_flags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
-	}
+    // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
+    // because it would be confusing to have two docking targets within each others.
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    if (opt_fullscreen)
+    {
+      ImGuiViewport* viewport = ImGui::GetMainViewport();
+      ImGui::SetNextWindowPos(viewport->GetWorkPos());
+      ImGui::SetNextWindowSize(viewport->GetWorkSize());
+      ImGui::SetNextWindowViewport(viewport->ID);
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+      window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
+                      | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+      window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+    }
+    else
+    {
+      dockspace_flags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
+    }
 
-	// When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background
-	// and handle the pass-thru hole, so we ask Begin() to not render a background.
-	if (dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode)
-	  window_flags |= ImGuiWindowFlags_NoBackground;
+    // When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background
+    // and handle the pass-thru hole, so we ask Begin() to not render a background.
+    if (dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode)
+      window_flags |= ImGuiWindowFlags_NoBackground;
 
-	// Important: note that we proceed even if Begin() returns false (aka window is collapsed).
-	// This is because we want to keep our DockSpace() active. If a DockSpace() is inactive,
-	// all active windows docked into it will lose their parent and become undocked.
-	// We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
-	// any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
-	if (!opt_padding)
-	  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-	ImGui::Begin("DockSpace Demo", p_open, window_flags);
-	if (!opt_padding)
-	  ImGui::PopStyleVar();
+    // Important: note that we proceed even if Begin() returns false (aka window is collapsed).
+    // This is because we want to keep our DockSpace() active. If a DockSpace() is inactive,
+    // all active windows docked into it will lose their parent and become undocked.
+    // We cannot preserve the docking relationship between an active window and an inactive docking,
+    // otherwise any change of dockspace/settings would lead to windows being stuck in limbo and
+    // never being visible.
+    if (!opt_padding)
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("DockSpace Demo", p_open, window_flags);
+    if (!opt_padding)
+      ImGui::PopStyleVar();
 
-	if (opt_fullscreen)
-	  ImGui::PopStyleVar(2);
+    if (opt_fullscreen)
+      ImGui::PopStyleVar(2);
 
-	// DockSpace
-	ImGuiIO& io = ImGui::GetIO();
-	if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
-	{
-	  ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
-	  ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-	}
+    // DockSpace
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
+    {
+      ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+      ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+    }
 
-	if (ImGui::BeginMenuBar())
-	{
-	  if (ImGui::BeginMenu("File"))
-	  {
-		// Disabling fullscreen would allow the window to be moved to the front of other windows,
-		// which we can't undo at the moment without finer window depth/z control.
-		if (ImGui::MenuItem("Exit"))
-		  Dark::Application::Get().Exit();
+    if (ImGui::BeginMenuBar())
+    {
+      if (ImGui::BeginMenu("File"))
+      {
+        // Disabling fullscreen would allow the window to be moved to the front of other windows,
+        // which we can't undo at the moment without finer window depth/z control.
+        if (ImGui::MenuItem("Exit"))
+          Dark::Application::Get().Exit();
 
-		ImGui::EndMenu();
-	  }
+        ImGui::EndMenu();
+      }
 
-	  ImGui::EndMenuBar();
-	}
+      ImGui::EndMenuBar();
+    }
 
-	// Scene
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0.0, 0.0 });
-	ImGui::Begin("Scene");
-	ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-	if (m_ViewportSize != *((glm::vec2*)&viewportPanelSize))
-	{
-	  m_Framebuffer->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
-	  m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
-	}
-	ImGui::Image((void*)m_Framebuffer->GetColorAttachmentRendererID(), ImVec2{ m_ViewportSize.x, m_ViewportSize.y }, ImVec2{ 0.0f, 1.0f }, ImVec2{ 1.0f, 0.0f });
-	ImGui::End();
-	ImGui::PopStyleVar();
+    // Scene
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0.0, 0.0 });
+    ImGui::Begin("Scene");
+    ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+    if (m_ViewportSize != *(( glm::vec2* )&viewportPanelSize))
+    {
+      m_Framebuffer->Resize(( uint32_t )viewportPanelSize.x, ( uint32_t )viewportPanelSize.y);
+      m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
+    }
+    ImGui::Image(( void* )m_Framebuffer->GetColorAttachmentRendererID(),
+                 ImVec2{ m_ViewportSize.x, m_ViewportSize.y }, ImVec2{ 0.0f, 1.0f },
+                 ImVec2{ 1.0f, 0.0f });
+    ImGui::End();
+    ImGui::PopStyleVar();
 
-	// Detail
-	ImGui::Begin("Detail");
-	ImGui::ColorEdit4("Square Color", glm::value_ptr(m_SquareColor));
-	ImGui::End();
+    // Detail
+    ImGui::Begin("Detail");
+    ImGui::ColorEdit4("Square Color", glm::value_ptr(m_SquareColor));
+    ImGui::End();
 
-	// Texture
-	ImGui::Begin("Texture");
-	ImGui::Text("Default Texture");
-	ImGui::ImageButton((void*)m_DfaultTex->GetRendererID(), ImVec2{ 64.0f, 64.0f });
-	ImGui::End();
+    // Texture
+    ImGui::Begin("Texture");
+    ImGui::Text("Default Texture");
+    ImGui::ImageButton(( void* )m_DfaultTex->GetRendererID(), ImVec2{ 64.0f, 64.0f });
+    ImGui::End();
 
-	//Setting
-	ImGui::Begin("Setting");
-	//Camera Rotation
-	//ImGui::DragFloat3("Camera Rotation", glm::value_ptr(m_CameraRotation), 0.03f);
-	ImGui::End();
+    // Setting
+    ImGui::Begin("Setting");
+    // Camera Rotation
+    // ImGui::DragFloat3("Camera Rotation", glm::value_ptr(m_CameraRotation), 0.03f);
+    ImGui::End();
 
-	ImGui::End();
+    ImGui::End();
   }
 
-}
+  Ref<btRigidBody> EditorLayer::CreateRigidBody(float mass, const btTransform& startTransform,
+                                                Ref<btCollisionShape> shape, const btVector4& color)
+  {
+    btAssert((!shape || shape->getShapeType() != INVALID_SHAPE_PROXYTYPE));
+
+    // rigidbody is dynamic if and only if mass is non zero, otherwise static
+    bool isDynamic = (mass != 0.f);
+
+    btVector3 localInertia(0, 0, 0);
+    if (isDynamic)
+      shape->calculateLocalInertia(mass, localInertia);
+
+      // using motionstate is recommended, it provides interpolation capabilities, and only
+      // synchronizes 'active' objects
+
+#define USE_MOTIONSTATE 1
+#ifdef USE_MOTIONSTATE
+    btDefaultMotionState* myMotionState = new btDefaultMotionState(startTransform);
+
+    btRigidBody::btRigidBodyConstructionInfo cInfo(mass, myMotionState, shape.get(), localInertia);
+
+    Ref<btRigidBody> body = std::make_shared<btRigidBody>(cInfo);
+    // body->setContactProcessingThreshold(m_defaultContactProcessingThreshold);
+
+#else
+    btRigidBody* body = new btRigidBody(mass, 0, shape, localInertia);
+    body->setWorldTransform(startTransform);
+#endif  //
+
+    body->setUserIndex(-1);
+    m_dynamicsWorld->addRigidBody(body.get());
+    return body;
+  }
+
+}  // namespace Dark
