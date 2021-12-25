@@ -10,3 +10,7 @@
 [submodule "Dark/vendor/glm"]
 	path = Dark/vendor/glm
 	url = https://github.com/g-truc/glm
+[submodule "Dark/vendor/bullet3"]
+	path = Dark/vendor/bullet3
+	url = https://github.com/Mostro-Complexity/bullet3.git
+	branch = test_premake

@@ -18,11 +18,23 @@ IncludeDir["Glad"] = "Dark/vendor/Glad/include"
 IncludeDir["ImGui"] = "Dark/vendor/imgui"
 IncludeDir["glm"] = "Dark/vendor/glm"
 IncludeDir["stb_image"] = "Dark/vendor/stb_image"
+IncludeDir["bullet3"] = "Dark/vendor/bullet3/src"
 
 group "Dependencies"
 	include "Dark/vendor/GLFW"
 	include "Dark/vendor/Glad"
 	include "Dark/vendor/imgui"
+	include "Dark/vendor/bullet3/src/Bullet3Collision"
+	include "Dark/vendor/bullet3/src/Bullet3Common"
+	include "Dark/vendor/bullet3/src/Bullet3Dynamics"
+	include "Dark/vendor/bullet3/src/Bullet3Geometry"
+	include "Dark/vendor/bullet3/src/Bullet3Serialize/Bullet2FileLoader"
+	include "Dark/vendor/bullet3/src/BulletCollision"
+	include "Dark/vendor/bullet3/src/BulletDynamics"
+	include "Dark/vendor/bullet3/src/BulletInverseDynamics"
+	include "Dark/vendor/bullet3/src/BulletSoftBody"
+	include "Dark/vendor/bullet3/src/LinearMath"
+	-- include "Dark/vendor/bullet3/src/Bullet3OpenCL"
 group ""
 
 project "Dark"
@@ -61,7 +73,8 @@ project "Dark"
 		"%{IncludeDir.Glad}",
 		"%{IncludeDir.ImGui}",
 		"%{IncludeDir.glm}",
-		"%{IncludeDir.stb_image}"
+		"%{IncludeDir.stb_image}",
+		"%{IncludeDir.bullet3}"
 
 	}
 
@@ -173,12 +186,25 @@ project "Dark-Editor"
 		"Dark/vendor/spdlog/include",
 		"Dark/src",
 		"Dark/vendor",
-		"%{IncludeDir.glm}"
+		"%{IncludeDir.glm}",
+		"%{IncludeDir.bullet3}"
 	}
 
 	links
 	{
-		"Dark"
+		"Dark",
+		"Bullet3Common",
+		"Bullet3Dynamics",
+		"Bullet3Geometry",
+		-- "Bullet3OpenCL.lib",
+		"BulletCollision",
+		"BulletDynamics",
+		-- "BulletInverseDynamics",
+		-- "BulletInverseDynamicsUtils",
+		-- "BulletSoftBody",
+		-- "BussIK",
+		-- "gwen_.",
+		"LinearMath"
 	}
 
 	filter "system:windows"
